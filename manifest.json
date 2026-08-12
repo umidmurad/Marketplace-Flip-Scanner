@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Marketplace Flip Scanner",
+  "version": "0.1.0",
+  "description": "Extract Facebook Marketplace listing details and open useful eBay comparable searches.",
+  "action": {
+    "default_title": "Show Marketplace Flip Scanner"
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.facebook.com/marketplace/item/*",
+        "https://web.facebook.com/marketplace/item/*"
+      ],
+      "js": ["src/extractor.js", "src/comps.js", "src/profitability.js", "src/content.js"],
+      "css": ["src/panel.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.ebay.com/sch/i.html*"
+      ],
+      "js": ["src/ebayResults.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.facebook.com/marketplace/item/*",
+    "https://web.facebook.com/marketplace/item/*",
+    "https://www.ebay.com/sch/i.html*"
+  ]
+}
