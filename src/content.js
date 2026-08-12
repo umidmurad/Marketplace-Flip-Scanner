@@ -6,6 +6,7 @@
   const CHECK_BUTTON_ID = "mfs-check-ebay";
   const PROFIT_SETTINGS_KEY = "mfsProfitSettings";
   const PANEL_POSITION_KEY = "mfsPanelPosition";
+  const AUTO_OPEN_KEY = "mfsAutoOpenPanel";
   const extractor = window.MFSListingExtractor;
   const compsAnalyzer = window.MFSComps;
   const profitability = window.MFSProfitability;
@@ -19,6 +20,7 @@
     panelPosition: null,
     isPanelClosed: false,
     isSearching: false,
+    autoOpenPanel: true,
     settingsLoaded: false,
     observer: null,
     refreshTimer: null,
@@ -60,6 +62,18 @@
     return Number.isFinite(value) ? `${value.toFixed(1)}%` : "n/a";
   }
 
+  function formatRoi(calculation) {
+    if (Number.isFinite(calculation.roiPercent)) {
+      return formatPercent(calculation.roiPercent);
+    }
+
+    if (calculation.purchasePrice === 0 && calculation.expectedProfit > 0) {
+      return "Free item";
+    }
+
+    return "n/a";
+  }
+
   function createPanel() {
     const panel = document.createElement("section");
     panel.id = PANEL_ID;
@@ -68,17 +82,26 @@
       "<div class='mfs-header'>",
       "  <strong>Flip Scanner</strong>",
       "  <div class='mfs-header-actions'>",
-      "    <span>Stage 4</span>",
+      "    <span>Final Version 0.1</span>",
       "    <button class='mfs-close' type='button' aria-label='Close Flip Scanner'>x</button>",
       "  </div>",
       "</div>",
       "<div class='mfs-panel-body'>",
-      "  <dl class='mfs-fields'>",
-      "    <div><dt>Title</dt><dd data-mfs-field='title'></dd></div>",
-      "    <div><dt>Price</dt><dd data-mfs-field='askingPrice'></dd></div>",
-      "    <div><dt>Image</dt><dd data-mfs-field='mainImageUrl'></dd></div>",
-      "    <div><dt>URL</dt><dd data-mfs-field='listingUrl'></dd></div>",
-      "  </dl>",
+      "  <div class='mfs-listing-card'>",
+      "    <div class='mfs-listing-main'>",
+      "      <strong data-mfs-field='compactTitle'></strong>",
+      "      <span data-mfs-field='compactPrice'></span>",
+      "    </div>",
+      "    <details class='mfs-listing-details'>",
+      "      <summary>Details</summary>",
+      "      <dl class='mfs-fields'>",
+      "        <div><dt>Title</dt><dd data-mfs-field='title'></dd></div>",
+      "        <div><dt>Price</dt><dd data-mfs-field='askingPrice'></dd></div>",
+      "        <div><dt>Image</dt><dd data-mfs-field='mainImageUrl'></dd></div>",
+      "        <div><dt>URL</dt><dd data-mfs-field='listingUrl'></dd></div>",
+      "      </dl>",
+      "    </details>",
+      "  </div>",
       "  <button id='mfs-check-ebay' type='button'>Check eBay</button>",
       "  <p class='mfs-status' data-mfs-field='status'></p>",
       "  <div class='mfs-results' data-mfs-results hidden></div>",
@@ -133,6 +156,35 @@
     description.textContent = value;
     item.append(term, description);
     return item;
+  }
+
+  function renderMetric(label, value, className) {
+    const item = renderStat(label, value);
+
+    if (className) {
+      item.classList.add(className);
+    }
+
+    return item;
+  }
+
+  function renderEstimateMetric(label, value, key, className) {
+    const item = renderMetric(label, value, className);
+    const description = item.querySelector("dd");
+
+    if (description) {
+      description.dataset.estimateValue = key;
+    }
+
+    return item;
+  }
+
+  function createBadge(label, tone) {
+    const badge = document.createElement("span");
+
+    badge.className = `mfs-badge mfs-badge-${tone || "neutral"}`;
+    badge.textContent = label;
+    return badge;
   }
 
   function clamp(value, min, max) {
@@ -524,46 +576,141 @@
   }
 
   function updateProfitSummary(root) {
-    const summary = root.querySelector("[data-profit-summary]");
-
-    if (!summary) {
-      return;
-    }
-
     const inputs = getProfitInputs();
     const calculation = profitability.calculateProfitability(inputs);
+    const summary = root.querySelector("[data-profit-summary]");
 
-    setText(summary, "[data-profit-value='purchase']", formatMoney(calculation.purchasePrice));
-    setText(summary, "[data-profit-value='expectedSale']", formatMoney(calculation.expectedSalePrice));
-    setText(summary, "[data-profit-value='expectedNet']", formatMoney(calculation.expectedNetProceeds));
-    setText(summary, "[data-profit-value='profit']", formatMoney(calculation.expectedProfit));
-    setText(summary, "[data-profit-value='roi']", formatPercent(calculation.roiPercent));
-
-    const detail = summary.querySelector("[data-profit-detail]");
-    if (detail) {
-      detail.textContent = [
-        `Buyer shipping ${formatMoney(calculation.buyerShippingCharged)}`,
-        `Fee base ${formatMoney(calculation.feeBase)}`,
-        `Fees ${formatMoney(calculation.ebaySellingFees)}`,
-        `Promoted ${formatMoney(calculation.promotedListingFees)}`,
-        `Ship cost ${formatMoney(calculation.shippingExpense)}`,
-        `Other ${formatMoney(calculation.packagingExpense + calculation.otherExpense)}`
-      ].join(" | ");
+    if (summary) {
+      setText(summary, "[data-profit-value='purchase']", formatMoney(calculation.purchasePrice));
+      setText(summary, "[data-profit-value='expectedSale']", formatMoney(calculation.expectedSalePrice));
+      setText(summary, "[data-profit-value='expectedNet']", formatMoney(calculation.expectedNetProceeds));
+      setText(summary, "[data-profit-value='profit']", formatMoney(calculation.expectedProfit));
+      setText(summary, "[data-profit-value='roi']", formatRoi(calculation));
+      summary.classList.toggle("mfs-profit-negative", calculation.expectedProfit < 0);
+      summary.classList.toggle("mfs-profit-free-purchase", calculation.purchasePrice === 0);
     }
 
-    summary.classList.toggle("mfs-profit-negative", calculation.expectedProfit < 0);
+    setText(root, "[data-estimate-value='profit']", formatMoney(calculation.expectedProfit));
+    setText(root, "[data-estimate-value='roi']", formatRoi(calculation));
+    setText(root, "[data-estimate-value='expectedNet']", formatMoney(calculation.expectedNetProceeds));
+    setText(root, "[data-estimate-value='buyerShipping']", formatMoney(calculation.buyerShippingCharged));
+    setText(root, "[data-estimate-value='costBreakdown']", getProfitBreakdownText(calculation));
+
+    const detail = summary && summary.querySelector("[data-profit-detail]");
+    if (detail) {
+      detail.textContent = getProfitBreakdownText(calculation);
+    }
+
+    const estimate = root.querySelector("[data-best-estimate]");
+    if (estimate) {
+      estimate.classList.toggle("mfs-best-estimate-negative", calculation.expectedProfit < 0);
+    }
 
     const hint = root.querySelector("[data-profit-hint]");
     if (hint) {
       const suggested = profitability.suggestFeeProfile(state.lastListingInfo && state.lastListingInfo.title);
-      const shippingCount = state.latestAnalysis ? state.latestAnalysis.stats.shippingCompCount : 0;
-      hint.textContent = [
-        `Fee: ${state.profitSettings.feeProfile === "auto" ? suggested.label : profitability.getFeeProfile(state.profitSettings.feeProfile).label}`,
-        state.profitSettings.buyerShippingChargedMode === "auto"
-          ? `Buyer shipping: average from ${shippingCount} comps`
-          : "Buyer shipping: manual"
-      ].join(" | ");
+      hint.textContent = `Fee: ${state.profitSettings.feeProfile === "auto" ? suggested.label : profitability.getFeeProfile(state.profitSettings.feeProfile).label}`;
     }
+  }
+
+  function getProfitBreakdownText(calculation) {
+    return [
+      `Buyer shipping ${formatMoney(calculation.buyerShippingCharged)}`,
+      `Fee base ${formatMoney(calculation.feeBase)}`,
+      `Fees ${formatMoney(calculation.ebaySellingFees)}`,
+      `Promoted ${formatMoney(calculation.promotedListingFees)}`,
+      `Ship cost ${formatMoney(calculation.shippingExpense)}`,
+      `Other ${formatMoney(calculation.packagingExpense + calculation.otherExpense)}`
+    ].join(" | ");
+  }
+
+  function renderBestEstimate(stats, calculation) {
+    const strip = document.createElement("div");
+
+    strip.className = "mfs-best-estimate";
+    strip.dataset.bestEstimate = "true";
+    strip.dataset.mfsSummarySection = "true";
+    strip.append(
+      renderEstimateMetric("Profit", formatMoney(calculation.expectedProfit), "profit", "mfs-primary-metric"),
+      renderEstimateMetric("ROI", formatRoi(calculation), "roi", "mfs-primary-metric"),
+      renderEstimateMetric("Expected Net", formatMoney(calculation.expectedNetProceeds), "expectedNet", "mfs-primary-metric"),
+      renderEstimateMetric("Cost Breakdown", getProfitBreakdownText(calculation), "costBreakdown", "mfs-detail-metric")
+    );
+
+    if (calculation.expectedProfit < 0) {
+      strip.classList.add("mfs-best-estimate-negative");
+    }
+
+    return strip;
+  }
+
+  function createTabNav() {
+    const nav = document.createElement("div");
+    const tabs = [
+      { label: "Summary", target: "[data-mfs-summary-section]" },
+      { label: "Assumptions", target: "[data-mfs-assumptions]" },
+      { label: "Comparables", target: "[data-mfs-comps-section]" }
+    ];
+
+    nav.className = "mfs-tab-nav";
+    nav.setAttribute("role", "tablist");
+    tabs.forEach((tab, index) => {
+      const button = document.createElement("button");
+
+      button.type = "button";
+      button.textContent = tab.label;
+      button.dataset.mfsScrollTarget = tab.target;
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", index === 0 ? "true" : "false");
+      nav.append(button);
+    });
+
+    return nav;
+  }
+
+  function bindTabNav(panel) {
+    panel.querySelectorAll("[data-mfs-scroll-target]").forEach((button) => {
+      if (button.dataset.mfsBound) {
+        return;
+      }
+
+      button.dataset.mfsBound = "true";
+      button.addEventListener("click", () => {
+        const target = panel.querySelector(button.dataset.mfsScrollTarget);
+
+        panel.querySelectorAll("[data-mfs-scroll-target]").forEach((tab) => {
+          tab.setAttribute("aria-selected", tab === button ? "true" : "false");
+        });
+
+        if (target) {
+          if (target.tagName === "DETAILS") {
+            target.open = true;
+          }
+
+          scrollPanelBodyToTarget(panel, target);
+        }
+      });
+    });
+  }
+
+  function scrollPanelBodyToTarget(rootElement, target) {
+    const panel = rootElement.closest(`#${PANEL_ID}`);
+    const body = panel && panel.querySelector(".mfs-panel-body");
+
+    if (!body) {
+      target.scrollIntoView({ block: "start", behavior: "smooth" });
+      return;
+    }
+
+    const bodyRect = body.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const stickyOffset = 44;
+    const top = body.scrollTop + targetRect.top - bodyRect.top - stickyOffset;
+
+    body.scrollTo({
+      top: Math.max(0, top),
+      behavior: "smooth"
+    });
   }
 
   function setText(root, selector, value) {
@@ -595,7 +742,7 @@
             const feeInput = panel.querySelector("[data-profit-input='ebayFeePercent']");
 
             if (feeInput) {
-              feeInput.value = String(activeFeePercent);
+              feeInput.value = formatInputValue(activeFeePercent, "%");
             }
           }
 
@@ -605,7 +752,7 @@
           const shippingInput = panel.querySelector("[data-profit-input='buyerShippingCharged']");
 
           if (shippingInput && value === "auto") {
-            shippingInput.value = String(getAutoBuyerShippingCharged());
+            shippingInput.value = formatInputValue(getAutoBuyerShippingCharged(), "$");
           }
 
           saveProfitSettings();
@@ -646,16 +793,12 @@
       "<div class='mfs-results-heading'>",
       "  <span class='mfs-settings-saved'>Settings saved</span>",
       "</div>",
-      "<dl class='mfs-profit-summary' data-profit-summary>",
-      "  <div><dt>Purchase</dt><dd data-profit-value='purchase'></dd></div>",
-      "  <div><dt>Expected Sale</dt><dd data-profit-value='expectedSale'></dd></div>",
-      "  <div><dt>Expected Net</dt><dd data-profit-value='expectedNet'></dd></div>",
-      "  <div><dt>Profit</dt><dd data-profit-value='profit'></dd></div>",
-      "  <div><dt>ROI</dt><dd data-profit-value='roi'></dd></div>",
-      "  <p data-profit-detail></p>",
-      "</dl>",
       "<p class='mfs-profit-hint' data-profit-hint></p>",
-      "<div class='mfs-profit-grid' data-profit-controls></div>"
+      "<details class='mfs-assumptions' data-mfs-assumptions>",
+      "  <summary>Edit assumptions</summary>",
+      "  <p class='mfs-assumption-note'>Buyer-paid shipping increases revenue and the eBay fee base. Your shipping cost is the label/postage you pay.</p>",
+      "  <div class='mfs-profit-grid' data-profit-controls></div>",
+      "</details>"
     ].join("");
 
     const heading = section.querySelector(".mfs-results-heading");
@@ -663,7 +806,7 @@
       "Profitability",
       [
         "Purchase - Marketplace asking price or your edited buy cost.",
-        "Expected Sale - Median used comp price or your edited sale estimate.",
+        "Expected Sale - Median used comparable price or your edited sale estimate.",
         "Expected Net - Sale price after fees, shipping, packaging, and other expenses.",
         "Buyer Shipping - Shipping amount the buyer pays; it increases revenue and the eBay fee base.",
         "Profit - Expected net minus purchase price.",
@@ -693,7 +836,7 @@
         "Buyer Shipping Mode",
         state.profitSettings.buyerShippingChargedMode,
         [
-          { value: "auto", label: "Auto from comps" },
+          { value: "auto", label: "Auto from comparables" },
           { value: "manual", label: "Manual" }
         ]
       ),
@@ -705,6 +848,36 @@
 
     updateProfitSummary(section);
     return section;
+  }
+
+  function getCompBadges(comp) {
+    const badges = [];
+    const score = comp.similarityScore || 0;
+    const title = String(comp.title || "").toLowerCase();
+
+    if (comp.isUsedForStats) {
+      badges.push(createBadge(score >= 0.8 ? "Strong match" : "Used", score >= 0.8 ? "good" : "neutral"));
+    } else {
+      badges.push(createBadge("Excluded", "bad"));
+    }
+
+    if (score < 0.65) {
+      badges.push(createBadge("Weak match", "warn"));
+    }
+
+    if (/\b(lot|bundle|pair|set of|pack of|\d+\s*(pc|pcs|piece|pieces))\b/i.test(title)) {
+      badges.push(createBadge("Lot", "warn"));
+    }
+
+    if (comp.isOutlier) {
+      badges.push(createBadge("Outlier", "bad"));
+    }
+
+    if (!Number.isFinite(comp.shippingPriceValue)) {
+      badges.push(createBadge("Shipping unknown", "neutral"));
+    }
+
+    return badges;
   }
 
   function renderResults(panel) {
@@ -723,6 +896,7 @@
     try {
       const fragment = document.createDocumentFragment();
       const { stats, comps, searchUrl, resultsUrl } = state.latestAnalysis;
+      const calculation = profitability.calculateProfitability(getProfitInputs());
 
       const heading = document.createElement("div");
       heading.className = "mfs-results-heading";
@@ -735,13 +909,13 @@
 
       heading.append(
         createHeadingTitle(
-          "eBay Sold Comps",
+          "eBay Sold Comparables",
           [
-            "Used - Accepted comps used for stats, out of all parsed sold candidates.",
-            "Median - Middle sold price from used comps; less sensitive to outliers.",
-            "Average - Mean sold price from used comps.",
-            "Low - Lowest sold price among used comps.",
-            "High - Highest sold price among used comps.",
+            "Used - Accepted comparables used for stats, out of all parsed sold candidates.",
+            "Median - Middle sold price from used comparables; less sensitive to outliers.",
+            "Average - Mean sold price from used comparables.",
+            "Low - Lowest sold price among used comparables.",
+            "High - Highest sold price among used comparables.",
             "Excluded - Parsed results shown but not used because of weak title match or outlier pricing."
           ].join("\n")
         ),
@@ -751,11 +925,11 @@
       const statsList = document.createElement("dl");
       statsList.className = "mfs-stats";
       statsList.append(
-        renderStat("Used", `${stats.compCount} of ${stats.candidateCount}`),
-        renderStat("Median", compsAnalyzer.formatMoney(stats.medianSoldPrice) || "n/a"),
-        renderStat("Average", compsAnalyzer.formatMoney(stats.averageSoldPrice) || "n/a"),
-        renderStat("Low", compsAnalyzer.formatMoney(stats.lowestSoldPrice) || "n/a"),
-        renderStat("High", compsAnalyzer.formatMoney(stats.highestSoldPrice) || "n/a")
+        renderMetric("Used", `${stats.compCount} of ${stats.candidateCount}`, "mfs-primary-metric"),
+        renderMetric("Median", compsAnalyzer.formatMoney(stats.medianSoldPrice) || "n/a", "mfs-primary-metric"),
+        renderMetric("Average", compsAnalyzer.formatMoney(stats.averageSoldPrice) || "n/a", "mfs-secondary-metric"),
+        renderMetric("Low", compsAnalyzer.formatMoney(stats.lowestSoldPrice) || "n/a", "mfs-secondary-metric"),
+        renderMetric("High", compsAnalyzer.formatMoney(stats.highestSoldPrice) || "n/a", "mfs-secondary-metric")
       );
 
       const note = document.createElement("p");
@@ -768,6 +942,7 @@
 
       const list = document.createElement("ol");
       list.className = "mfs-comp-list";
+      list.dataset.mfsCompList = "true";
 
       comps.forEach((comp) => {
         const item = document.createElement("li");
@@ -779,10 +954,11 @@
         const price = document.createElement("strong");
         price.textContent = comp.soldPrice || "No price";
 
-        const badge = document.createElement("span");
-        badge.textContent = comp.isUsedForStats ? "Used" : "Excluded";
+        const badgeGroup = document.createElement("span");
+        badgeGroup.className = "mfs-badge-group";
+        badgeGroup.append(...getCompBadges(comp));
 
-        row.append(price, badge);
+        row.append(price, badgeGroup);
 
         const compTitle = document.createElement("a");
         compTitle.href = comp.listingUrl;
@@ -795,7 +971,7 @@
           comp.saleDate || "Date n/a",
           comp.condition || "Condition n/a",
           `match ${Math.round((comp.similarityScore || 0) * 100)}%`,
-          comp.shippingPrice || "Shipping n/a"
+          comp.shippingPrice || "Shipping unknown"
         ].join(" | ");
 
         const reason = document.createElement("p");
@@ -808,10 +984,21 @@
         list.append(item);
       });
 
-      fragment.append(heading, statsList, note, createProfitabilitySection(), list);
+      const compsSection = document.createElement("section");
+      compsSection.className = "mfs-comps-section";
+      compsSection.dataset.mfsCompsSection = "true";
+      compsSection.append(heading, statsList, note, list);
+
+      fragment.append(
+        createTabNav(),
+        renderBestEstimate(stats, calculation),
+        createProfitabilitySection(),
+        compsSection
+      );
       container.replaceChildren(fragment);
       container.hidden = false;
       bindProfitInputs(container);
+      bindTabNav(container);
       updateProfitSummary(container);
     } catch (error) {
       warn("Unable to render eBay results panel.", {
@@ -841,6 +1028,8 @@
     resetListingStateIfNeeded(info);
     state.lastListingInfo = info;
 
+    setField(panel, "compactTitle", info.title, "Listing title not found");
+    setField(panel, "compactPrice", info.askingPrice, "Price not found");
     setField(panel, "title", info.title, "Not found");
     setField(panel, "askingPrice", info.askingPrice, "Not found");
     setField(panel, "mainImageUrl", info.mainImageUrl, "Not found");
@@ -855,7 +1044,7 @@
     } else if (state.latestAnalysis) {
       setStatus(panel, `Loaded ${state.latestAnalysis.stats.candidateCount} eBay sold candidates.`, false);
     } else if (missingFields.length === 0) {
-      setStatus(panel, "Listing captured. Ready to check eBay comps.");
+      setStatus(panel, "Listing captured. Ready to check eBay comparables.");
     } else {
       setStatus(panel, `Missing: ${missingFields.join(", ")}. Check DevTools console for details.`, true);
     }
@@ -920,6 +1109,10 @@
   }
 
   function refresh() {
+    if (state.isPanelClosed && !state.autoOpenPanel) {
+      return;
+    }
+
     const info = extractListingInfo();
     const signature = JSON.stringify(info);
 
@@ -977,7 +1170,7 @@
       resultsUrl: message.resultsUrl
     };
 
-    console.info(DEBUG_PREFIX, "Received eBay sold comps.", state.latestAnalysis);
+    console.info(DEBUG_PREFIX, "Received eBay sold comparables.", state.latestAnalysis);
     renderPanel(listingInfo);
     sendResponse({ ok: true });
   }
@@ -1031,7 +1224,14 @@
 
     debug("Initializing content script.");
     loadProfitSettings(() => {
-      refresh();
+      loadAutoOpenSetting((autoOpen) => {
+        state.autoOpenPanel = autoOpen;
+        state.isPanelClosed = !autoOpen;
+
+        if (autoOpen) {
+          refresh();
+        }
+      });
       startObserver();
       window.addEventListener("resize", () => {
         const panel = document.getElementById(PANEL_ID);
@@ -1046,6 +1246,25 @@
       });
       window.setTimeout(refresh, 1000);
       window.setTimeout(refresh, 3000);
+    });
+  }
+
+  function loadAutoOpenSetting(callback) {
+    if (!chrome.storage || !chrome.storage.local) {
+      callback(true);
+      return;
+    }
+
+    chrome.storage.local.get(AUTO_OPEN_KEY, (result) => {
+      const runtimeError = chrome.runtime.lastError;
+
+      if (runtimeError) {
+        warn("Unable to load auto-open setting.", runtimeError);
+        callback(true);
+        return;
+      }
+
+      callback(result && result[AUTO_OPEN_KEY] !== false);
     });
   }
 

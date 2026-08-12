@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "description": "Extract Facebook Marketplace listing details and open useful eBay comparable searches.",
   "action": {
-    "default_title": "Show Marketplace Flip Scanner"
+    "default_title": "Marketplace Flip Scanner",
+    "default_popup": "src/popup.html"
   },
   "background": {
     "service_worker": "src/background.js"
@@ -27,7 +28,7 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["storage"],
+  "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "https://www.facebook.com/marketplace/item/*",
     "https://web.facebook.com/marketplace/item/*",

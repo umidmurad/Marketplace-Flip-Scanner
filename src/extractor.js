@@ -3,6 +3,26 @@
 
   const DEBUG_PREFIX = "[Marketplace Flip Scanner]";
   const PANEL_ID = "mfs-stage-one-panel";
+  const NON_LISTING_TITLE_TEXT = new Set([
+    "ad",
+    "buying",
+    "categories",
+    "chats",
+    "create multiple listings",
+    "create new listing",
+    "details",
+    "inbox",
+    "listed",
+    "location",
+    "marketplace",
+    "menu",
+    "message",
+    "notifications",
+    "saved",
+    "seller details",
+    "seller information",
+    "selling"
+  ]);
 
   function debug(message, data) {
     if (data === undefined) {
@@ -61,6 +81,108 @@
       .trim();
   }
 
+  function isNonListingTitleText(value) {
+    const text = normalizeText(value).toLowerCase();
+
+    return !text || NON_LISTING_TITLE_TEXT.has(text);
+  }
+
+  function isLikelyListingTitle(value) {
+    const text = cleanTitle(value);
+
+    if (isNonListingTitleText(text)) {
+      return false;
+    }
+
+    if (text.length < 8 || text.length > 140) {
+      return false;
+    }
+
+    if (!/[a-z]/i.test(text)) {
+      return false;
+    }
+
+    if (/^(hi,\s*)?is this available\??$/i.test(text)) {
+      return false;
+    }
+
+    if (/^(listed|joined|send seller|seller|condition|free pickup|pickup|within)\b/i.test(text)) {
+      return false;
+    }
+
+    if (/^\$?\d[\d,.]*(?:\s*-\s*\$?\d[\d,.]*)?$/.test(text)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function scoreTitleCandidate(element, text) {
+    const rect = element.getBoundingClientRect();
+    const tagName = String(element.tagName || "").toLowerCase();
+    const role = String(element.getAttribute && element.getAttribute("role") || "").toLowerCase();
+    const ariaLevel = String(element.getAttribute && element.getAttribute("aria-level") || "");
+    const viewportWidth = root.innerWidth || root.document.documentElement.clientWidth || 1200;
+    let score = 0;
+
+    if (tagName === "h1") {
+      score += 80;
+    } else if (tagName === "h2") {
+      score += 45;
+    } else if (role === "heading" && ariaLevel === "1") {
+      score += 70;
+    } else if (role === "heading") {
+      score += 35;
+    }
+
+    if (rect.left > viewportWidth * 0.45) {
+      score += 45;
+    } else if (rect.left < viewportWidth * 0.28) {
+      score -= 70;
+    }
+
+    if (/\b(model|with|w\/|new|used|open box|scanner|charger|power|bank)\b/i.test(text)) {
+      score += 20;
+    }
+
+    if (/\d/.test(text)) {
+      score += 12;
+    }
+
+    score += Math.min(text.length, 80) / 4;
+    score -= Math.max(0, text.length - 90) / 2;
+    return score;
+  }
+
+  function getVisibleTitleCandidates(selector) {
+    return Array.from(root.document.querySelectorAll(selector))
+      .filter((element) => !isInsideExtensionPanel(element))
+      .filter(isVisible)
+      .map((element) => ({
+        element,
+        text: cleanTitle(element.textContent)
+      }))
+      .filter((candidate) => isLikelyListingTitle(candidate.text))
+      .map((candidate) => ({
+        ...candidate,
+        score: scoreTitleCandidate(candidate.element, candidate.text)
+      }))
+      .sort((a, b) => b.score - a.score);
+  }
+
+  function titleFromDescriptionText(value) {
+    const text = normalizeText(value);
+
+    if (!text || text.length < 20) {
+      return "";
+    }
+
+    const firstSentence = cleanTitle(text.split(/(?<=[.!?])\s+/)[0]).replace(/[.!?]+$/, "");
+    const withoutTrailingCondition = firstSentence.replace(/\s+(good|great|excellent|fair|poor)\s+condition\.?$/i, "");
+
+    return isLikelyListingTitle(withoutTrailingCondition) ? withoutTrailingCondition : "";
+  }
+
   function getTitle() {
     const metaTitle = cleanTitle(
       getMetaContent([
@@ -75,19 +197,34 @@
       return metaTitle;
     }
 
-    const headingCandidates = Array.from(root.document.querySelectorAll("h1, [role='heading'][aria-level='1'], [role='heading']"))
-      .filter((element) => !isInsideExtensionPanel(element))
-      .map((element) => normalizeText(element.textContent))
-      .filter(Boolean)
-      .filter((text) => !/facebook|marketplace|notifications|menu/i.test(text));
+    const headingCandidates = getVisibleTitleCandidates("h1, h2, [role='heading'][aria-level='1'], [role='heading']");
 
     if (headingCandidates.length > 0) {
       debug("Title found in visible heading.", headingCandidates[0]);
-      return headingCandidates[0];
+      return headingCandidates[0].text;
+    }
+
+    const descriptionCandidates = Array.from(root.document.querySelectorAll("div, span, [dir='auto']"))
+      .filter((element) => !isInsideExtensionPanel(element))
+      .filter(isVisible)
+      .map((element) => {
+        const text = titleFromDescriptionText(element.textContent);
+
+        return {
+          element,
+          text,
+          score: text ? scoreTitleCandidate(element, text) - 20 : -Infinity
+        };
+      })
+      .filter((candidate) => candidate.text);
+
+    if (descriptionCandidates.length > 0) {
+      debug("Title inferred from listing description.", descriptionCandidates[0]);
+      return descriptionCandidates[0].text;
     }
 
     const documentTitle = cleanTitle(root.document.title);
-    if (documentTitle && !/^facebook$/i.test(documentTitle)) {
+    if (isLikelyListingTitle(documentTitle) && !/^facebook$/i.test(documentTitle)) {
       debug("Title found in document.title.", documentTitle);
       return documentTitle;
     }

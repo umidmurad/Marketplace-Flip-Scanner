@@ -28,10 +28,14 @@
     return (value || "").replace(/\s+/g, " ").trim();
   }
 
+  function getElementText(element) {
+    return normalizeText(element && (element.innerText || element.textContent));
+  }
+
   function getTextFromSelectors(container, selectors) {
     for (const selector of selectors) {
       const element = container.querySelector(selector);
-      const text = normalizeText(element && element.textContent);
+      const text = getElementText(element);
 
       if (text) {
         return text;
@@ -44,7 +48,7 @@
   function getAllTextFromSelectors(container, selectors) {
     return selectors
       .flatMap((selector) => Array.from(container.querySelectorAll(selector)))
-      .map((element) => normalizeText(element.textContent))
+      .map(getElementText)
       .filter(Boolean);
   }
 
@@ -71,19 +75,14 @@
   }
 
   function extractShipping(container) {
-    const selectorText = getTextFromSelectors(container, [
-      ".s-item__shipping",
-      ".s-card__shipping",
-      "[data-testid='shipping']",
-      "[class*='shipping']"
-    ]);
+    const selectorText = getShippingTextFromSelectors(container);
     const text = selectorText || extractShippingFromText(container);
 
     if (!text) {
       return "";
     }
 
-    if (/free/i.test(text)) {
+    if (/\bfree\s+(?:shipping|delivery)\b/i.test(text)) {
       return "Free shipping";
     }
 
@@ -91,14 +90,31 @@
     return match ? match[0] : text;
   }
 
-  function extractShippingFromText(container) {
-    const text = normalizeText(container.textContent);
+  function getShippingTextFromSelectors(container) {
+    const candidates = getAllTextFromSelectors(container, [
+      ".s-item__shipping",
+      ".s-card__shipping",
+      "[data-testid='shipping']",
+      "[data-testid='delivery']",
+      "[class*='delivery']",
+      "[class*='shipping']",
+      ".s-card__attribute-row",
+      ".s-item__details",
+      ".s-item__detail",
+      ".su-styled-text"
+    ]);
 
-    if (/\bfree shipping\b/i.test(text)) {
+    return candidates.find(hasShippingText) || "";
+  }
+
+  function extractShippingFromText(container) {
+    const text = getElementText(container);
+
+    if (/\bfree\s+(?:shipping|delivery)\b/i.test(text)) {
       return "Free shipping";
     }
 
-    if (/\bshipping not specified\b/i.test(text)) {
+    if (/\b(?:shipping|delivery) not specified\b/i.test(text)) {
       return "Shipping not specified";
     }
 
@@ -111,16 +127,85 @@
     return plusShippingMatch ? `${plusShippingMatch[0]} shipping` : "";
   }
 
+  function hasShippingText(text) {
+    return /\bfree\s+(?:shipping|delivery)\b/i.test(text)
+      || /\b(?:shipping|delivery) not specified\b/i.test(text)
+      || /(?:\+?\s*(?:US\s*)?\$[\d,]+(?:\.\d{2})?)\s*(?:shipping|delivery)/i.test(text);
+  }
+
   function isSoldResult(container) {
-    const text = normalizeText(container.textContent);
+    const text = getElementText(container);
     return /\bSold\b/i.test(text) || /(?:LH_Sold|LH_Complete)=1/i.test(root.location.search);
+  }
+
+  function scoreResultContainer(container) {
+    const text = getElementText(container);
+
+    if (!text) {
+      return -Infinity;
+    }
+
+    let score = 0;
+
+    if (/\bSold\b/i.test(text)) {
+      score += 35;
+    }
+
+    if (/(?:US\s*)?\$[\d,]+(?:\.\d{2})?/.test(text)) {
+      score += 25;
+    }
+
+    if (/\b(?:free\s+)?(?:shipping|delivery)\b/i.test(text)) {
+      score += 25;
+    }
+
+    if (/\b(?:pre-owned|used|open box|brand new|new)\b/i.test(text)) {
+      score += 10;
+    }
+
+    if (container.querySelector && container.querySelector("a[href*='/itm/'], a[href*='itm/']")) {
+      score += 10;
+    }
+
+    if (text.length > 1200) {
+      score -= 40;
+    }
+
+    return score;
+  }
+
+  function getBestAncestorContainer(link) {
+    const candidates = [];
+    let current = link;
+    let depth = 0;
+
+    while (current && depth < 8) {
+      candidates.push(current);
+      current = current.parentElement;
+      depth += 1;
+    }
+
+    const closestCard = typeof link.closest === "function"
+      ? link.closest(RESULT_CARD_SELECTOR) || link.closest("li") || link.closest("div")
+      : null;
+
+    if (closestCard) {
+      candidates.push(closestCard);
+    }
+
+    return candidates
+      .filter(Boolean)
+      .map((container) => ({
+        container,
+        score: scoreResultContainer(container)
+      }))
+      .sort((a, b) => b.score - a.score)[0]?.container || closestCard || link;
   }
 
   function getResultContainers() {
     const selectorContainers = Array.from(root.document.querySelectorAll(RESULT_CARD_SELECTOR));
     const linkContainers = Array.from(root.document.querySelectorAll("a[href*='/itm/'], a[href*='itm/']"))
-      .filter((link) => typeof link.closest === "function")
-      .map((link) => link.closest(RESULT_CARD_SELECTOR) || link.closest("li") || link.closest("div"))
+      .map(getBestAncestorContainer)
       .filter(Boolean);
     const containers = [...selectorContainers, ...linkContainers];
 
@@ -128,7 +213,7 @@
   }
 
   function extractPriceFromText(container) {
-    const text = normalizeText(container.textContent);
+    const text = getElementText(container);
     const soldPriceMatch = text.match(/(?:Sold\s+)?(?:for\s+)?((?:US\s*)?\$[\d,]+(?:\.\d{2})?)(?!\s*shipping)/i);
 
     return soldPriceMatch ? soldPriceMatch[1] : "";
@@ -176,6 +261,8 @@
         ".s-item__shipping",
         ".s-card__shipping",
         "[data-testid='shipping']",
+        "[data-testid='delivery']",
+        "[class*='delivery']",
         "[class*='shipping']"
       ]).slice(0, 3)
     };
