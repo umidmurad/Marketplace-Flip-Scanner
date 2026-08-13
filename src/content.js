@@ -4,6 +4,7 @@
   const DEBUG_PREFIX = "[Marketplace Flip Scanner]";
   const PANEL_ID = "mfs-stage-one-panel";
   const CHECK_BUTTON_ID = "mfs-check-ebay";
+  const COPY_IMAGE_BUTTON_ID = "mfs-copy-image-url";
   const PROFIT_SETTINGS_KEY = "mfsProfitSettings";
   const PANEL_POSITION_KEY = "mfsPanelPosition";
   const AUTO_OPEN_KEY = "mfsAutoOpenPanel";
@@ -102,7 +103,10 @@
       "      </dl>",
       "    </details>",
       "  </div>",
-      "  <button id='mfs-check-ebay' type='button'>Check eBay</button>",
+      "  <div class='mfs-search-actions'>",
+      "    <button id='mfs-copy-image-url' type='button' title='Copy the captured Marketplace image URL'>Copy Image URL</button>",
+      "    <button id='mfs-check-ebay' type='button'>Check eBay</button>",
+      "  </div>",
       "  <p class='mfs-status' data-mfs-field='status'></p>",
       "  <div class='mfs-results' data-mfs-results hidden></div>",
       "</div>",
@@ -115,6 +119,46 @@
     bindPanelResize(panel);
     loadPanelPosition(panel);
     return panel;
+  }
+
+  function copyImageUrl(imageUrl) {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+      return Promise.reject(new Error("Clipboard access is unavailable."));
+    }
+
+    return navigator.clipboard.writeText(imageUrl);
+  }
+
+  function bindCopyImageButton(panel) {
+    const button = panel.querySelector(`#${COPY_IMAGE_BUTTON_ID}`);
+
+    if (!button || button.dataset.mfsBound) {
+      return;
+    }
+
+    button.dataset.mfsBound = "true";
+    button.addEventListener("click", () => {
+      const info = extractListingInfo();
+      const imageUrl = info && info.mainImageUrl;
+
+      if (!imageUrl) {
+        setStatus(panel, "Main image missing. Nothing was copied.", true);
+        return;
+      }
+
+      copyImageUrl(imageUrl)
+        .then(() => {
+          console.info(DEBUG_PREFIX, "Copied Marketplace image URL.", { imageUrl });
+          setStatus(panel, "Image URL copied. Paste it into eBay image search.", false);
+        })
+        .catch((error) => {
+          warn("Unable to copy Marketplace image URL.", {
+            error: error.message,
+            imageUrl
+          });
+          setStatus(panel, "Could not copy the image URL. Check DevTools console.", true);
+        });
+    });
   }
 
   function getPanel() {
@@ -1051,6 +1095,12 @@
 
     renderResults(panel);
     updateResizeAvailability(panel);
+    bindCopyImageButton(panel);
+
+    const copyButton = panel.querySelector(`#${COPY_IMAGE_BUTTON_ID}`);
+    if (copyButton) {
+      copyButton.disabled = !info.mainImageUrl;
+    }
 
     const button = panel.querySelector(`#${CHECK_BUTTON_ID}`);
     if (button && !button.dataset.mfsBound) {

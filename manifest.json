@@ -28,7 +28,7 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "clipboardWrite"],
   "host_permissions": [
     "https://www.facebook.com/marketplace/item/*",
     "https://web.facebook.com/marketplace/item/*",
