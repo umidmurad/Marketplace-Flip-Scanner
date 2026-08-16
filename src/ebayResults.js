@@ -4,7 +4,9 @@
   const DEBUG_PREFIX = "[Marketplace Flip Scanner]";
   const MAX_RESULTS = 30;
   const state = {
-    observer: null
+    observer: null,
+    started: false,
+    locationWatcher: null
   };
   const RESULT_CARD_SELECTOR = [
     "li.s-item",
@@ -135,7 +137,18 @@
 
   function isSoldResult(container) {
     const text = getElementText(container);
-    return /\bSold\b/i.test(text) || /(?:LH_Sold|LH_Complete)=1/i.test(root.location.search);
+    return /\bSold\b/i.test(text) || /LH_Sold=1/i.test(root.location.search);
+  }
+
+  function shouldExtractResults(locationLike) {
+    const search = String((locationLike && locationLike.search) || "");
+    const params = new URLSearchParams(search);
+
+    if (!params.has("visualSearchGuid")) {
+      return true;
+    }
+
+    return params.get("LH_Complete") === "1" && params.get("LH_Sold") === "1";
   }
 
   function scoreResultContainer(container) {
@@ -328,6 +341,11 @@
       state.observer.disconnect();
       state.observer = null;
     }
+
+    if (isFinal && state.locationWatcher) {
+      root.clearInterval(state.locationWatcher);
+      state.locationWatcher = null;
+    }
   }
 
   function scheduleSend() {
@@ -335,9 +353,15 @@
     scheduleSend.timer = root.setTimeout(sendResults, 500);
   }
 
-  function init() {
-    if (!/\/sch\/i\.html/.test(root.location.pathname)) {
-      return;
+  function startExtraction() {
+    if (state.started || !/\/sch\/i\.html/.test(root.location.pathname) || !shouldExtractResults(root.location)) {
+      return false;
+    }
+
+    state.started = true;
+    if (state.locationWatcher) {
+      root.clearInterval(state.locationWatcher);
+      state.locationWatcher = null;
     }
 
     debug("Initializing eBay results extractor.");
@@ -352,6 +376,20 @@
       childList: true,
       subtree: true
     });
+    return true;
+  }
+
+  function init() {
+    if (!/\/sch\/i\.html/.test(root.location.pathname)) {
+      return;
+    }
+
+    if (startExtraction()) {
+      return;
+    }
+
+    debug("Waiting for completed and sold filters before reading visual-search results.", root.location.href);
+    state.locationWatcher = root.setInterval(startExtraction, 300);
   }
 
   root.MFSEbayResults = {
@@ -360,7 +398,8 @@
     extractShippingFromText,
     extractSoldResults,
     extractSaleDate,
-    getResultContainers
+    getResultContainers,
+    shouldExtractResults
   };
 
   if (typeof module !== "undefined" && module.exports) {

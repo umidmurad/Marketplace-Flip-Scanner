@@ -22,6 +22,13 @@
     },
     {
       "matches": [
+        "https://www.ebay.com/*"
+      ],
+      "js": ["src/ebayImageSearch.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "https://www.ebay.com/sch/i.html*"
       ],
       "js": ["src/ebayResults.js"],
@@ -32,6 +39,6 @@
   "host_permissions": [
     "https://www.facebook.com/marketplace/item/*",
     "https://web.facebook.com/marketplace/item/*",
-    "https://www.ebay.com/sch/i.html*"
+    "https://www.ebay.com/*"
   ]
 }
