@@ -4,6 +4,8 @@
   const DEBUG_PREFIX = "[Marketplace Flip Scanner]";
   const PANEL_ID = "mfs-stage-one-panel";
   const CHECK_BUTTON_ID = "mfs-check-ebay";
+  const COPY_IMAGE_BUTTON_ID = "mfs-copy-image-url";
+  const IMAGE_SEARCH_BUTTON_ID = "mfs-check-ebay-image";
   const PROFIT_SETTINGS_KEY = "mfsProfitSettings";
   const PANEL_POSITION_KEY = "mfsPanelPosition";
   const AUTO_OPEN_KEY = "mfsAutoOpenPanel";
@@ -102,7 +104,11 @@
       "      </dl>",
       "    </details>",
       "  </div>",
-      "  <button id='mfs-check-ebay' type='button'>Check eBay</button>",
+      "  <div class='mfs-search-actions'>",
+      "    <button id='mfs-copy-image-url' type='button' title='Copy the captured Marketplace image URL'>Copy Image URL</button>",
+      "    <button id='mfs-check-ebay-image' type='button'>Image Search</button>",
+      "    <button id='mfs-check-ebay' type='button'>Title Search</button>",
+      "  </div>",
       "  <p class='mfs-status' data-mfs-field='status'></p>",
       "  <div class='mfs-results' data-mfs-results hidden></div>",
       "</div>",
@@ -115,6 +121,97 @@
     bindPanelResize(panel);
     loadPanelPosition(panel);
     return panel;
+  }
+
+  function copyImageUrl(imageUrl) {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+      return Promise.reject(new Error("Clipboard access is unavailable."));
+    }
+
+    return navigator.clipboard.writeText(imageUrl);
+  }
+
+  function bindCopyImageButton(panel) {
+    const button = panel.querySelector(`#${COPY_IMAGE_BUTTON_ID}`);
+
+    if (!button || button.dataset.mfsBound) {
+      return;
+    }
+
+    button.dataset.mfsBound = "true";
+    button.addEventListener("click", () => {
+      const info = extractListingInfo();
+      const imageUrl = info && info.mainImageUrl;
+
+      if (!imageUrl) {
+        setStatus(panel, "Main image missing. Nothing was copied.", true);
+        return;
+      }
+
+      copyImageUrl(imageUrl)
+        .then(() => {
+          console.info(DEBUG_PREFIX, "Copied Marketplace image URL.", { imageUrl });
+          setStatus(panel, "Image URL copied. Paste it into eBay image search.", false);
+        })
+        .catch((error) => {
+          warn("Unable to copy Marketplace image URL.", {
+            error: error.message,
+            imageUrl
+          });
+          setStatus(panel, "Could not copy the image URL. Check DevTools console.", true);
+        });
+    });
+  }
+
+  function bindImageSearchButton(panel) {
+    const button = panel.querySelector(`#${IMAGE_SEARCH_BUTTON_ID}`);
+
+    if (!button || button.dataset.mfsBound) {
+      return;
+    }
+
+    button.dataset.mfsBound = "true";
+    button.addEventListener("click", () => {
+      const latestInfo = extractListingInfo();
+
+      if (state.isSearching) {
+        setStatus(panel, "An eBay search is already running.", true);
+        return;
+      }
+
+      if (!latestInfo.mainImageUrl) {
+        warn("Cannot search eBay by image because the Marketplace image was not found.", latestInfo);
+        setStatus(panel, "Main image missing. Cannot start eBay image search.", true);
+        return;
+      }
+
+      console.info(DEBUG_PREFIX, "eBay image search clicked. Captured listing payload:", latestInfo);
+      state.isSearching = true;
+      state.latestAnalysis = null;
+      renderResults(panel);
+      setStatus(panel, "Opening eBay image search in the background...", false);
+
+      chrome.runtime.sendMessage(
+        {
+          type: "MFS_OPEN_EBAY_IMAGE_SEARCH",
+          listingInfo: latestInfo
+        },
+        (response) => {
+          const runtimeError = chrome.runtime.lastError;
+
+          if (runtimeError || !response || !response.ok) {
+            const message = runtimeError ? runtimeError.message : response && response.error;
+            state.isSearching = false;
+            warn("Failed to start eBay image search.", { message, latestInfo });
+            setStatus(panel, `${message || "Could not start eBay image search."} Use Copy Image URL instead.`, true);
+            return;
+          }
+
+          console.info(DEBUG_PREFIX, "Background eBay image search opened.", response);
+          setStatus(panel, "eBay image search is running silently...", false);
+        }
+      );
+    });
   }
 
   function getPanel() {
@@ -1042,7 +1139,8 @@
     if (state.isSearching) {
       setStatus(panel, "Waiting for eBay sold listings...", false);
     } else if (state.latestAnalysis) {
-      setStatus(panel, `Loaded ${state.latestAnalysis.stats.candidateCount} eBay sold candidates.`, false);
+      const method = state.latestAnalysis.searchMethod === "image" ? " from image search" : "";
+      setStatus(panel, `Loaded ${state.latestAnalysis.stats.candidateCount} eBay sold candidates${method}.`, false);
     } else if (missingFields.length === 0) {
       setStatus(panel, "Listing captured. Ready to check eBay comparables.");
     } else {
@@ -1051,6 +1149,18 @@
 
     renderResults(panel);
     updateResizeAvailability(panel);
+    bindCopyImageButton(panel);
+    bindImageSearchButton(panel);
+
+    const copyButton = panel.querySelector(`#${COPY_IMAGE_BUTTON_ID}`);
+    if (copyButton) {
+      copyButton.disabled = !info.mainImageUrl;
+    }
+
+    const imageButton = panel.querySelector(`#${IMAGE_SEARCH_BUTTON_ID}`);
+    if (imageButton) {
+      imageButton.disabled = !info.mainImageUrl;
+    }
 
     const button = panel.querySelector(`#${CHECK_BUTTON_ID}`);
     if (button && !button.dataset.mfsBound) {
@@ -1058,6 +1168,11 @@
       button.addEventListener("click", () => {
         const latestInfo = extractListingInfo();
         const currentStatus = panel.querySelector("[data-mfs-field='status']");
+
+        if (state.isSearching) {
+          setStatus(panel, "An eBay search is already running.", true);
+          return;
+        }
 
         console.info(DEBUG_PREFIX, "Check eBay clicked. Captured listing payload:", latestInfo);
 
@@ -1089,6 +1204,7 @@
 
             if (runtimeError || !response || !response.ok) {
               const message = runtimeError ? runtimeError.message : response && response.error;
+              state.isSearching = false;
               warn("Failed to open eBay search.", { message, latestInfo });
               if (currentStatus) {
                 currentStatus.textContent = "Could not open eBay. Check DevTools console.";
@@ -1167,7 +1283,8 @@
     state.latestAnalysis = {
       ...analysis,
       searchUrl: message.searchUrl,
-      resultsUrl: message.resultsUrl
+      resultsUrl: message.resultsUrl,
+      searchMethod: message.searchMethod || "title"
     };
 
     console.info(DEBUG_PREFIX, "Received eBay sold comparables.", state.latestAnalysis);
@@ -1275,6 +1392,25 @@
 
     if (message.type === "MFS_EBAY_RESULTS") {
       handleEbayResults(message, sendResponse);
+      return false;
+    }
+
+    if (message.type === "MFS_EBAY_IMAGE_STATUS") {
+      const panel = getPanel();
+
+      if (message.isError) {
+        state.isSearching = false;
+      }
+
+      if (panel) {
+        setStatus(panel, message.message || "eBay image-search status unavailable.", Boolean(message.isError));
+      }
+
+      console[message.isError ? "warn" : "info"](DEBUG_PREFIX, "eBay image-search status.", {
+        message: message.message,
+        diagnostics: message.diagnostics
+      });
+      sendResponse({ ok: true });
       return false;
     }
 

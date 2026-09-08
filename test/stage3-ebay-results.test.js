@@ -159,6 +159,23 @@ global.console = {
 const ebayResults = require("../src/ebayResults");
 const results = ebayResults.extractSoldResults();
 
+assert.strictEqual(
+  ebayResults.shouldExtractResults({ search: "?visualSearchGuid=example" }),
+  false
+);
+assert.strictEqual(
+  ebayResults.shouldExtractResults({ search: "?visualSearchGuid=example&LH_Complete=1" }),
+  false
+);
+assert.strictEqual(
+  ebayResults.shouldExtractResults({ search: "?visualSearchGuid=example&LH_Complete=1&LH_Sold=1" }),
+  true
+);
+assert.strictEqual(
+  ebayResults.shouldExtractResults({ search: "?_nkw=sony&LH_Complete=1&LH_Sold=1" }),
+  true
+);
+
 assert.strictEqual(results.length, 6);
 assert.strictEqual(results[0].title, "Sony Walkman WM-FX290 Cassette Player");
 assert.strictEqual(results[0].soldPrice, "$45.00");
