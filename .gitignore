@@ -5,6 +5,7 @@ Thumbs.db
 # Editor / local workspace
 .idea/
 .vscode/
+AGENTS.MD
 *.swp
 *.swo
 

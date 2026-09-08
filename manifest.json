@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Marketplace Flip Scanner",
   "version": "0.1.0",
-  "description": "Extract Facebook Marketplace listing details and open useful eBay comparable searches.",
+  "description": "Compare Facebook Marketplace listings with eBay sold listings and estimate resale profit.",
   "action": {
     "default_title": "Marketplace Flip Scanner",
     "default_popup": "src/popup.html"

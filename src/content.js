@@ -84,7 +84,7 @@
       "<div class='mfs-header'>",
       "  <strong>Flip Scanner</strong>",
       "  <div class='mfs-header-actions'>",
-      "    <span>Final Version 0.1</span>",
+      "    <span>Version 0.1</span>",
       "    <button class='mfs-close' type='button' aria-label='Close Flip Scanner'>x</button>",
       "  </div>",
       "</div>",
@@ -1395,7 +1395,7 @@
       return false;
     }
 
-    if (message.type === "MFS_EBAY_IMAGE_STATUS") {
+    if (message.type === "MFS_EBAY_SEARCH_STATUS") {
       const panel = getPanel();
 
       if (message.isError) {
@@ -1403,10 +1403,10 @@
       }
 
       if (panel) {
-        setStatus(panel, message.message || "eBay image-search status unavailable.", Boolean(message.isError));
+        setStatus(panel, message.message || "eBay search status unavailable.", Boolean(message.isError));
       }
 
-      console[message.isError ? "warn" : "info"](DEBUG_PREFIX, "eBay image-search status.", {
+      console[message.isError ? "warn" : "info"](DEBUG_PREFIX, "eBay search status.", {
         message: message.message,
         diagnostics: message.diagnostics
       });

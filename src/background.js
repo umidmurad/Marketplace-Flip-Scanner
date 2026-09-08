@@ -2,7 +2,7 @@ importScripts("ebaySearch.js");
 
 const DEBUG_PREFIX = "[Marketplace Flip Scanner]";
 const EBAY_HOME_URL = "https://www.ebay.com/";
-const IMAGE_SEARCH_TIMEOUT_MS = 60000;
+const SEARCH_TIMEOUT_MS = 60000;
 const pendingEbayTabs = new Map();
 
 function debug(message, data) {
@@ -38,12 +38,22 @@ function openEbaySearch(listingInfo, sourceTabId, sendResponse) {
     }
 
     if (tab && tab.id && sourceTabId) {
-      pendingEbayTabs.set(tab.id, {
+      const pending = {
         mode: "title",
         sourceTabId,
         listingInfo,
-        searchUrl: url
-      });
+        searchUrl: url,
+        timeoutId: null,
+        isFailing: false
+      };
+
+      pending.timeoutId = setTimeout(() => {
+        failSearch(tab.id, "eBay title search did not finish in time.", {
+          stage: "timeout"
+        });
+      }, SEARCH_TIMEOUT_MS);
+
+      pendingEbayTabs.set(tab.id, pending);
     }
 
     debug("Opened background eBay sold listings search.", {
@@ -67,7 +77,7 @@ function sendMarketplaceMessage(pending, message, callback) {
     const runtimeError = chrome.runtime.lastError;
 
     if (runtimeError) {
-      console.warn(DEBUG_PREFIX, "Unable to update Marketplace image-search status.", runtimeError);
+      console.warn(DEBUG_PREFIX, "Unable to update Marketplace search status.", runtimeError);
     }
 
     if (callback) {
@@ -112,10 +122,10 @@ function getImageSearchAction(urlValue, pending) {
   };
 }
 
-function failImageSearch(tabId, error, diagnostics) {
+function failSearch(tabId, error, diagnostics) {
   const pending = pendingEbayTabs.get(tabId);
 
-  if (!pending || pending.mode !== "image" || pending.isFailing) {
+  if (!pending || pending.isFailing) {
     return;
   }
 
@@ -126,7 +136,7 @@ function failImageSearch(tabId, error, diagnostics) {
     pending.timeoutId = null;
   }
 
-  console.warn(DEBUG_PREFIX, "eBay image search failed.", {
+  console.warn(DEBUG_PREFIX, "eBay search failed.", {
     tabId,
     error,
     diagnostics
@@ -135,8 +145,10 @@ function failImageSearch(tabId, error, diagnostics) {
   sendMarketplaceMessage(
     pending,
     {
-      type: "MFS_EBAY_IMAGE_STATUS",
-      message: `${error} Use Copy Image URL or title search instead.`,
+      type: "MFS_EBAY_SEARCH_STATUS",
+      message: pending.mode === "image"
+        ? `${error} Use Copy Image URL or title search instead.`
+        : `${error} Try the title search again or open eBay manually.`,
       isError: true,
       diagnostics: diagnostics || {}
     },
@@ -188,10 +200,10 @@ function openEbayImageSearch(listingInfo, sourceTabId, sendResponse) {
     };
 
     pending.timeoutId = setTimeout(() => {
-      failImageSearch(tab.id, "eBay image search did not finish in time.", {
+      failSearch(tab.id, "eBay image search did not finish in time.", {
         stage: "timeout"
       });
-    }, IMAGE_SEARCH_TIMEOUT_MS);
+    }, SEARCH_TIMEOUT_MS);
 
     pendingEbayTabs.set(tab.id, pending);
     debug("Opened background eBay image search.", {
@@ -216,7 +228,7 @@ function handleImagePageReady(message, sender, sendResponse) {
 
   if (!action.ok) {
     sendResponse(action);
-    failImageSearch(tabId, action.error, {
+    failSearch(tabId, action.error, {
       stage: message.pageStage,
       url: message.url
     });
@@ -241,7 +253,7 @@ function forwardImageProgress(message, sender) {
   }
 
   sendMarketplaceMessage(pending, {
-    type: "MFS_EBAY_IMAGE_STATUS",
+    type: "MFS_EBAY_SEARCH_STATUS",
     message: message.message,
     isError: false,
     diagnostics: {
@@ -378,7 +390,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "MFS_EBAY_IMAGE_ERROR") {
     const tabId = sender && sender.tab && sender.tab.id;
-    failImageSearch(tabId, message.message || "eBay image-search automation failed.", {
+    failSearch(tabId, message.message || "eBay image-search automation failed.", {
       stage: message.stage,
       url: message.url,
       page: message.diagnostics || {}
@@ -408,14 +420,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
   pendingEbayTabs.delete(tabId);
 
-  if (pending.mode === "image") {
-    sendMarketplaceMessage(pending, {
-      type: "MFS_EBAY_IMAGE_STATUS",
-      message: "The background eBay image-search tab closed before results were ready.",
-      isError: true,
-      diagnostics: { stage: "tab-closed" }
-    });
-  }
+  sendMarketplaceMessage(pending, {
+    type: "MFS_EBAY_SEARCH_STATUS",
+    message: `The background eBay ${pending.mode === "image" ? "image" : "title"} search tab closed before results were ready.`,
+    isError: true,
+    diagnostics: { stage: "tab-closed" }
+  });
 });
 
 chrome.action.onClicked.addListener(showScannerPanel);
